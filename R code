@@ -1,0 +1,480 @@
+#call library
+library(Zelig)
+library(Amelia)
+library(OTE)
+library(tidyverse)
+library(data.table)
+library(mltools)
+library(ESKNN)
+library(e1071) 
+library(corrplot)
+library(ggpubr)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(ROCR)
+library(rworldmap)
+library(RColorBrewer)
+library(ggthemes)
+library(caret)
+library(kernlab)
+library(ranger)
+library(lattice)
+library(ClassComparison)
+library(Modeler)
+library(VIM)
+library(mice)
+
+#Plot amount of symptoms
+data <- read.csv("C:/Users/DELL/Downloads/Dissertation/examinate_data.csv",header=TRUE)
+
+new_data <- data[,12:18]
+summary(new_data)
+
+#Fever
+fever_chills_no<-179+17+2+2+10
+fever_chills_no
+#Cough
+coughno<-42+67+2+1
+coughno
+#Sorethroat
+sorethroatno<-9+3+10+8
+sorethroatno
+#Malaise
+malaiseno<-14+11+2
+malaiseno
+#Fatigue
+fatigueno<-10+1
+fatigueno
+
+x_ax <- list(title = "Symptoms")
+y_ax <- list(title = "Number of cases that symptoms occur")
+
+table <- data.frame(x = c("fever and chills","cough","sore throat","malaise","fatigue"),
+                    y = c(210,112,30,27,11))
+table$x <- factor(table$x, levels = c("fever and chills","cough","sore throat","malaise","fatigue"))
+
+fig<-plot_ly(data=table,x = ~x,y = ~y,type = "bar")
+fig <- fig %>% layout(xaxis = x_ax, yaxis = y_ax)
+
+fig
+
+
+#plot world map
+original <- read.csv("C:/Users/DELL/Downloads/Dissertation/data_country2.csv",header=TRUE)
+
+visitedMap <- joinCountryData2Map(original, 
+                                  joinCode = "NAME",
+                                  nameJoinColumn = "country")
+
+#See the country names:   namecon<-countrySynonyms
+#see colour code
+colors()[100:150]
+colourPalette <-brewer.pal(nrow(original),'RdYlGn')
+mapParams <- mapCountryData(visitedMap, 
+                            nameColumnToPlot="count",numCats = 21,xlim = NA, ylim = NA,
+                            mapRegion = "world", oceanCol = "azure2",
+                            catMethod = "fixedWidth",
+                            missingCountryCol = gray(.8),
+                            colourPalette=c("heat"),
+                            
+                            addLegend = F,mapTitle = "",border = NA)
+
+
+do.call(addMapLegend, c(mapParams, legendLabels="all",
+                        legendWidth=0.5,
+                        legendIntervals="data",
+                        legendMar=2))
+
+
+#Preprocessiong
+#missing data
+data_1 <- read.csv("C:/Users/DELL/Downloads/Dissertation/data_encode.csv",header=TRUE)
+data_1<- data_1 %>% mutate_all(na_if,"")
+data2 <- data_1 %>% select(location,country,gender,age,day_before_hos,visiting.Wuhan,from.Wuhan,death,symptom1,symptom2,symptom3)
+
+#plot missing data map
+
+ggplot_missing <- function(x){
+  
+  x %>% 
+    is.na %>%
+    melt %>%
+    ggplot(data = .,
+           aes(x = Var2,
+               y = Var1)) +
+    geom_raster(aes(fill = value)) +
+    scale_fill_grey(name = "",
+                    labels = c("Present","Missing")) +
+    theme_tufte() + 
+    theme(axis.text.x  = element_text(angle=30, vjust=0.5)) + 
+    labs(x = "Variables in Dataset",
+         y = "NUmber of observations")
+}
+ggplot_missing(data2)
+
+#count NA
+sum(is.na(data2$day_before_hos))
+#103 NA from 222 data (46.39%)
+
+#impute data with Amelia
+imp.amelia<-amelia(data2,m=5, ords="gender")
+lm.amelia.out <- lapply(imp.amelia$imputations, function(i) lm(death ~gender+age+day_before_hos, 
+                                                               data = i))
+coefs.amelia <- do.call(rbind, lapply(lm.amelia.out, function(i) coef(summary(i))[, 
+                                                                                  1]))
+ses.amelia <- do.call(rbind, lapply(lm.amelia.out, function(i) coef(summary(i))[, 
+                                                                                2]))
+mi.meld(coefs.amelia, ses.amelia)
+
+#saves it to a system file
+save(imp.amelia, file = "dataimpute.RData")
+
+#writes to a text file
+write.amelia(obj = imp.amelia, file.stem = "imputedata")
+
+#analysis model
+#select the lowest SD in predict value
+#outdata1
+outdata1<-read.csv("C:/Users/DELL/Documents/imputedata1.csv")
+z.out<-zelig(death~., data=outdata1, model="ls")
+summary(z.out)
+x.out<-setx(z.out)
+s.out<-sim(z.out,x=x.out)
+s.out
+#sd=0.3533479
+
+#outdata2
+outdata2<-read.csv("C:/Users/DELL/Documents/imputedata2.csv")
+z.out2<-zelig(death~., data=outdata2, model="ls")
+summary(z.out2)
+x.out2<-setx(z.out2)
+s.out2<-sim(z.out2,x=x.out)
+s.out2
+#sd=0.3463932
+
+#outdata3
+outdata3<-read.csv("C:/Users/DELL/Documents/imputedata3.csv")
+z.out3<-zelig(death~., data=outdata3, model="ls")
+summary(z.out3)
+x.out3<-setx(z.out3)
+s.out3<-sim(z.out3,x=x.out)
+s.out3
+#sd=0.3482606
+
+#outdata4
+outdata4<-read.csv("C:/Users/DELL/Documents/imputedata4.csv")
+z.out4<-zelig(death~., data=outdata4, model="ls")
+summary(z.out4)
+x.out4<-setx(z.out4)
+s.out4<-sim(z.out4,x=x.out)
+s.out4
+#sd=0.3447783
+
+#outdata5
+outdata5<-read.csv("C:/Users/DELL/Documents/imputedata5.csv")
+z.out5<-zelig(death~., data=outdata5, model="ls")
+summary(z.out5)
+x.out5<-setx(z.out5)
+s.out5<-sim(z.out5,x=x.out)
+s.out5
+#sd=0.3475363
+
+
+#impute data with Mice
+imp1 <- mice(data2, m = 5)
+imp1$imp$age
+
+#outdata1
+wholeData1 <- complete(imp1,1)
+mi.out1<-zelig(death~., data=wholeData1, model="ls")
+summary(mi.out1)
+mi.out1<-setx(mi.out1)
+p.out1<-sim(mi.out1,x=x.out)
+p.out1
+
+#outdata2
+wholeData2 <- complete(imp1,2)
+mi.out2<-zelig(death~., data=wholeData2, model="ls")
+summary(mi.out2)
+mi.out2<-setx(mi.out2)
+p.out2<-sim(mi.out2,x=x.out)
+p.out2
+#outdata3
+wholeData3 <- complete(imp1,3)
+
+mi.out3<-zelig(death~., data=wholeData3, model="ls")
+summary(mi.out3)
+mi.out3<-setx(mi.out3)
+p.out3<-sim(mi.out3,x=x.out)
+p.out3
+
+#outdata4
+wholeData4 <- complete(imp1,4)
+mi.out4<-zelig(death~., data=wholeData4, model="ls")
+summary(mi.out4)
+mi.out4<-setx(mi.out4)
+p.out4<-sim(mi.out4,x=x.out)
+p.out4
+
+#outdata5
+wholeData5 <- complete(imp1,5)
+mi.out5<-zelig(death~., data=wholeData5, model="ls")
+summary(mi.out5)
+mi.out5<-setx(mi.out5)
+p.out5<-sim(mi.out5,x=x.out)
+p.out5
+
+
+#correlation plot
+data_recove <- read.csv("C:/Users/DELL/Downloads/Dissertation/imputedata4.csv",header=TRUE)
+#drop first column
+data_recove <- subset(data_recove, select = -c(X,recovered))
+M<-cor(data_recove)
+head(round(M,2))
+corrplot(M, method="number")
+
+#imputed data use in the experiment
+datafinal <- read.csv("C:/Users/DELL/Downloads/Dissertation/imputedata4.csv",header=TRUE)
+#drop first column
+datafinal <- subset(datafinal, select = -c(X,recovered))
+
+
+#plot age vs death
+model <- glm (death ~ age, data = datafinal, family = binomial)
+summary(model)
+predict11 <- predict(model, type = 'response')
+ROCRpred <- prediction(predict11, datafinal$death)
+ROCRperf <- performance(ROCRpred, 'tpr','fpr')
+plot(ROCRperf, colorize = TRUE, text.adj = c(-0.2,1.7))
+
+ageplot<-ggplot(train, aes(x=age, y=death)) + geom_point(color="orange") + 
+  geom_smooth(method = "glm", method.args = list(family = "binomial"))
+print(ageplot + theme(plot.title = element_text(hjust=0.5))+labs(y="Death (1=death,0=survived)", x = "Age (years)"))
+
+
+
+#OTE
+#10 fold cross validation
+#divide data into independent variable x and dependent variable y
+dataX<-datafinal[,1:10]
+dataY<-datafinal[,11]
+#function
+cv.OTE<- function (dataY, dataX, K=10, seed=3456) {
+  n <- nrow(dataX)
+  n
+  set.seed(seed)
+  library(class)
+  
+  f <- ceiling(n/K)
+  s <- sample(rep(1:K, f), n)  
+  dataX=scale(dataX)
+  CV=NULL;PvsO=NULL
+  
+  for (i in 1:K) { 
+    test.index <- seq_len(n)[(s == i)] #test data
+    train.index <- seq_len(n)[(s != i)] #training data
+    
+    train.X <- dataX[train.index,]
+    test.X <- dataX[test.index,]
+    train.y <- dataY[train.index]
+    test.y <- dataY[test.index]
+    #predicted test set y
+    
+    Opt.Trees= OTClass(train.X,train.y,
+                       t.initial=100,method="oob+independent")
+    
+    #observed - predicted on test data 
+    
+    Prediction <- Predict.OTClass(Opt.Trees, test.X,test.y)
+    print(Prediction)
+  } 
+  
+}
+
+#call function
+cv.OTE(dataY, dataX, K=10, seed=3456)
+
+#mean of all folds error
+aq=0.173913+0.04761905+0.1304348+0.09090909+0.04347826+0.2380952+0.08695652+0.1428571+0.1818182+0.08695652
+aq2=aq/10
+aq2
+#aq2=0.1223038
+
+#SD of all folds error
+s_d2<-c(0.173913,0.04761905,0.1304348,0.09090909,0.04347826,0.2380952,0.08695652,0.1428571,0.1818182,0.08695652)
+sd(s_d2)
+#sd=0.0626963
+
+
+#confusion matrix
+#Predicted Class   0   1
+#              0  15   1
+#              1   0   7
+#Error.Rate= 0.04347826
+accuracy_eot = 0.9565217
+cat("accuracy:",accuracy_eot)
+
+#precision recall F1
+
+precision_OTE=0.875
+
+recall_OTE=1
+f1_OTE = 2 * precision_OTE * recall_OTE / (precision_OTE + recall_OTE) 
+data.frame(precision_OTE, recall_OTE, f1_OTE) 
+ 
+
+#ESkNN
+
+#10 fold cross validation find best k
+train_control <- trainControl(method="cv", number=10)
+model <- train(death~., data=datafinal, trControl=train_control, method="knn")
+print(model)
+#best k is 5 with RMSE 0.2797216, Rsquared 0.6104265, MAE 0.1374148
+
+#10 fold cross validation
+dataX<-datafinal[,1:10]
+dataY<-datafinal[,11]
+#function
+cv.knn<- function (dataY, dataX, kn=5, K=10, seed=123) {
+  n <- nrow(dataX)
+  n
+  set.seed(seed)
+  library(class)
+  
+  f <- ceiling(n/K)
+  s <- sample(rep(1:K, f), n)  
+  dataX=scale(dataX)
+  CV=NULL;PvsO=NULL
+  
+  for (i in 1:K) { 
+    test.index <- seq_len(n)[(s == i)] #test data
+    train.index <- seq_len(n)[(s != i)] #training data
+    
+    train.X <- dataX[train.index,]
+    test.X <- dataX[test.index,]
+    train.y <- dataY[train.index]
+    test.y <- dataY[test.index]
+    #fit ESkNN model
+    kn=5
+    model=esknnClass(train.X, train.y,k=kn)
+    
+    #predicted
+    
+    knn.pred<-Predict.esknnClass(model,test.X,test.y,k=kn)
+    
+    print(knn.pred)
+  } 
+}
+
+#call function
+cv.knn(dataY, dataX, kn=5, K=10, seed=123)
+
+#mean of all folds error
+aw=0.1304348+0.1904762+0.09090909+0.3478261+0.2608696+0.08695652+0.1363636
++0.2+0.1818182+0.3043478
+aw2=aw/10
+#aw2=0.1243836
+
+#SD of all folds error
+s_d<-c(0.1304348,0.1904762,0.09090909,0.3478261,0.2608696,0.08695652,0.1363636
+       ,0.2,0.1818182,0.3043478)
+sd(s_d)
+#sd=0.08815769
+
+#confusion matrix of fold number 6 that is the lowest error among 10 folds
+#          Predicted.Class
+#True.Class  0  1
+#        -1 16  2
+#        0   0  5
+
+#ClassError 0.08695652
+
+#Accuracy
+#Error rate = 1 - accuracy
+accuracy_knn = 0.9130435
+cat("accuracy:",accuracy_knn)
+
+#precision, recall, F1
+precision_knn=0.8888889
+recall_knn=1
+f1_knn = 2 * precision_knn * recall_knn / (precision_knn + recall_knn) 
+data.frame(precision_knn, recall_knn, f1_knn) 
+
+
+#SVM
+
+##k-fold cross validation
+
+classifier = svm( formula = death ~ .,
+                  data = datafinal,
+                  type = 'C-classification',
+                  kernel = 'radial',
+                  cost = 10^2,
+                  gamma = 10^-2,
+                  cross  = 10)
+summary(classifier)
+mat = table(classifier$fitted,datafinal$death)
+mat
+
+#mean of all folds error
+aw=0.454545+0.454545+0.0909091+0.1363636+0.0434783+0+0.0909091+0.0909091+0.454545+0.2173913
+aw2=aw/10
+#aw2 = 0.2033595
+
+#SD of all folds error
+s_d<-c(0.454545,0.454545,0.0909091,0.1363636,0.0434783,0,0.0909091,0.0909091,0.454545,0.2173913)
+sd(s_d)
+#sd = 0.1822148
+
+#Confusion Matrix
+#          Predicted.Class
+#True.Class  0  1
+#        -1 158 8
+#        0   1  55
+
+#ClassError 0.0765766
+
+#Error rate = 1 - accuracy
+accuracy_svm = 92.34234 
+cat("accuracy:",accuracy_svm)
+
+#precision recall F1
+precision_svm=0.8730159
+
+recall_svm=0.9821429
+f1_svm = 2 * precision_svm * recall_svm / (precision_svm + recall_svm) 
+data.frame(precision_svm, recall_svm, f1_svm) 
+
+
+
+#summary
+
+sum_dis <- c("OTE","OTE","OTE","OTE","ESkNN","ESkNN","ESkNN","ESkNN","SVM","SVM","SVM","SVM")
+type<-c("Accuracy","Precision","Recall","F1","Accuracy","Precision","Recall","F1","Accuracy","Precision","Recall","F1")
+acc_no <- c(0.9565217,0.875,1,0.9333333,0.9130435,0.7142857,1,0.8333333,0.9234234,0.8730159,0.9821429,0.9243698)
+
+
+combind_death <- data.frame(sum_dis,type,acc_no)
+Method<-combind_death$type
+combind_death 
+
+#plot evaluation performance
+eva<-ggplot(combind_death, aes(x=type, y=acc_no))+
+  geom_bar(aes(fill=Method),stat='identity')+
+  facet_wrap(~sum_dis)
+print(eva + theme(plot.title = element_text(hjust=0.5))+labs(y="Performance", x = "Evaluation methods"))
+
+
+
+#uncertainty plot
+combind_sd <- data.frame(
+  meth1 = factor(c("OTE","ESkNN","SVM")),
+  SD_value = c(0.0626963,0.08815769,0.1822148))
+
+
+p <- ggplot(data=combind_sd, aes(x=meth1, y=SD_value,colour=SD_value)) +
+  geom_line(aes(group=1)) +
+  geom_point()
+
+print(p + theme(plot.title = element_text(hjust=0.5))+labs(y="Standard Deviation", x = "Methods"))
